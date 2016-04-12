@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/model">
+        <file>res/XXX.z</file>
+        <file>res/rfpredict.cl</file>
+    </qresource>
+</RCC>

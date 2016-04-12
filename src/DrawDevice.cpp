@@ -1,0 +1,223 @@
+﻿//------------------------------------------------------------------------------
+// <copyright file="DrawDevice.cpp" company="Microsoft">
+//     Copyright (c) Microsoft Corporation.  All rights reserved.
+// </copyright>
+//------------------------------------------------------------------------------
+
+#include "stdafx.h"
+#include "DrawDevice.h"
+
+/// <summary>
+/// Constructor
+/// </summary>
+DrawDevice::DrawDevice() : 
+    m_hWnd(0),
+    m_sourceWidth(0),
+    m_sourceHeight(0),
+    m_sourceStride(0),
+    m_pD2DFactory(NULL), 
+    m_pRenderTarget(NULL),
+    m_pBitmap(0)
+{
+    m_pBrushJointTracked = NULL;
+    m_pBrushJointInferred = NULL;
+    m_pBrushBodyPartCentroidTracked = NULL;
+    m_pBrushBodyPartCentroidInferred = NULL;
+	m_pBrushBoneTracked = NULL;
+	m_pBrushBoneInferred = NULL;
+	ZeroMemory(m_Points,sizeof(m_Points));
+}
+
+/// <summary>
+/// Destructor
+/// </summary>
+DrawDevice::~DrawDevice()
+{
+    DiscardResources();
+    SafeRelease(m_pD2DFactory);
+}
+
+
+/// <summary>
+/// Get Control Size
+/// </summary>
+/// <returns>D2D1_SIZE_U</returns>
+D2D1_SIZE_U DrawDevice::GetControlSize()
+{
+    RECT rc;
+    GetWindowRect(m_hWnd, &rc );  
+
+    int width = rc.right - rc.left;
+    int height = rc.bottom - rc.top;
+    D2D1_SIZE_U size = D2D1::SizeU( width, height );
+    return size;
+}
+
+
+/// <summary>
+/// Ensure necessary Direct2d resources are created
+/// </summary>
+/// <returns>S_OK if successful, otherwise an error code</returns>
+HRESULT DrawDevice::EnsureResources(BOOL bUseControlSize/* = FALSE*/)
+{
+    HRESULT hr = S_OK;
+
+    if ( !m_pRenderTarget )
+    {
+        D2D1_SIZE_U size;
+        if (bUseControlSize)
+        {
+            size = GetControlSize();
+        }
+        else
+        {
+            size = D2D1::SizeU( m_sourceWidth, m_sourceHeight );
+        }
+
+        D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties();
+        rtProps.pixelFormat = D2D1::PixelFormat( DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE);
+        rtProps.usage = D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE;
+
+        // Create a Hwnd render target, in order to render to the window set in initialize
+        hr = m_pD2DFactory->CreateHwndRenderTarget(
+            rtProps,
+            D2D1::HwndRenderTargetProperties(m_hWnd, size),
+            &m_pRenderTarget
+            );
+
+        if ( FAILED( hr ) )
+        {
+            return hr;
+        }
+
+        // Create a bitmap that we can copy image data into and then render to the target
+        hr = m_pRenderTarget->CreateBitmap(
+            size, 
+            D2D1::BitmapProperties( D2D1::PixelFormat( DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE) ),
+            &m_pBitmap 
+            );
+
+        if ( FAILED( hr ) )
+        {
+            SafeRelease( m_pRenderTarget );
+            return hr;
+        }
+
+		//RED
+		m_pRenderTarget->CreateSolidColorBrush( D2D1::ColorF( 255, 0, 0 ), &m_pBrushJointTracked );
+
+		//????
+		m_pRenderTarget->CreateSolidColorBrush( D2D1::ColorF( 255, 128, 0 ), &m_pBrushJointInferred );
+
+        //light green
+        m_pRenderTarget->CreateSolidColorBrush( D2D1::ColorF( 68, 192, 68 ), &m_pBrushBodyPartCentroidTracked );
+
+        //yellow
+        m_pRenderTarget->CreateSolidColorBrush( D2D1::ColorF( 255, 255, 0 ), &m_pBrushBodyPartCentroidInferred );
+
+        //green
+		m_pRenderTarget->CreateSolidColorBrush( D2D1::ColorF( 0, 128, 0 ), &m_pBrushBoneTracked );
+
+		//gray
+		m_pRenderTarget->CreateSolidColorBrush( D2D1::ColorF( 128, 128, 128 ), &m_pBrushBoneInferred );
+    }
+
+    return hr;
+}
+
+/// <summary>
+/// Dispose of Direct2d resources 
+/// </summary>
+void DrawDevice::DiscardResources( )
+{
+    SafeRelease(m_pRenderTarget);
+    SafeRelease(m_pBitmap);
+
+    SafeRelease( m_pBrushJointTracked );
+    SafeRelease( m_pBrushJointInferred );
+    SafeRelease( m_pBrushBodyPartCentroidTracked );
+    SafeRelease( m_pBrushBodyPartCentroidInferred );
+	SafeRelease( m_pBrushBoneTracked );
+	SafeRelease( m_pBrushBoneInferred );
+}
+
+/// <summary>
+/// Set the window to draw to as well as the video format
+/// Implied bits per pixel is 32
+/// </summary>
+/// <param name="hWnd">window to draw to</param>
+/// <param name="pD2DFactory">already created D2D factory object</param>
+/// <param name="sourceWidth">width (in pixels) of image data to be drawn</param>
+/// <param name="sourceHeight">height (in pixels) of image data to be drawn</param>
+/// <param name="sourceStride">length (in bytes) of a single scanline</param>
+/// <returns>true if successful, false otherwise</returns>
+bool DrawDevice::Initialize( HWND hWnd, ID2D1Factory * pD2DFactory, int sourceWidth, int sourceHeight, int sourceStride )
+{
+    if ( NULL == pD2DFactory )
+    {
+        return false;
+    }
+
+    m_hWnd = hWnd;
+
+    // One factory for the entire application so save a pointer here
+    m_pD2DFactory = pD2DFactory;
+
+    m_pD2DFactory->AddRef( );
+
+    // Get the frame size
+    m_sourceWidth  = sourceWidth;
+    m_sourceHeight = sourceHeight;
+    m_sourceStride = sourceStride;
+
+    return true;
+}
+
+/// <summary>
+/// Draws a 32 bit per pixel image of previously specified width, height, and stride to the associated hwnd
+/// </summary>
+/// <param name="pImage">image data in RGBX format</param>
+/// <param name="cbImage">size of image data in bytes</param>
+/// <returns>true if successful, false otherwise</returns>
+bool DrawDevice::Draw( BYTE * pImage, unsigned long cbImage )
+{
+    // incorrectly sized image data passed in
+    if ( cbImage < ((m_sourceHeight - 1) * m_sourceStride) + (m_sourceWidth * 4) )
+    {
+        return false;
+    }
+
+    // create the resources for this draw device
+    // they will be recreated if previously lost
+    HRESULT hr = EnsureResources( );
+
+    if ( FAILED( hr ) )
+    {
+        return false;
+    }
+    
+    // Copy the image that was passed in into the direct2d bitmap
+    hr = m_pBitmap->CopyFromMemory( NULL, pImage, m_sourceStride );
+
+    if ( FAILED( hr ) )
+    {
+        return false;
+    }
+       
+    m_pRenderTarget->BeginDraw();
+
+    // Draw the bitmap stretched to the size of the window
+    m_pRenderTarget->DrawBitmap( m_pBitmap );
+            
+    hr = m_pRenderTarget->EndDraw();
+
+    // Device lost, need to recreate the render target
+    // We'll dispose it now and retry drawing
+    if ( hr == D2DERR_RECREATE_TARGET )
+    {
+        hr = S_OK;
+        DiscardResources();
+    }
+
+    return SUCCEEDED( hr );
+}

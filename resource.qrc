@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/model">
+        <file>res/XXX.z</file>
+    </qresource>
+</RCC>
